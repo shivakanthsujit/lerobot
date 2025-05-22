@@ -594,24 +594,17 @@ class So100SimFollowerConfig(ManipulatorRobotConfig):
                     "Wrist_Roll",
                     "Jaw",
                 ],
-                launch_viewer=True,
+                launch_viewer=False,
             )
         }
     )
 
     cameras: dict[str, CameraConfig] = field(
         default_factory=lambda: {
-            "laptop": OpenCVCameraConfig(
-                camera_index=0,
-                fps=30,
-                width=640,
-                height=480,
-            ),
-            "phone": OpenCVCameraConfig(
-                camera_index=1,
-                fps=30,
-                width=640,
-                height=480,
+            "sim_camera": MujocoCameraConfig(
+                width=256,
+                height=256,
+                camera_name="front_camera"
             ),
         }
     )

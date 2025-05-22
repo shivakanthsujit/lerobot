@@ -285,6 +285,11 @@ class ManipulatorRobot:
         for name in self.leader_arms:
             self.leader_arms[name].read("Present_Position")
 
+        if self.robot_type == "so100_sim_follower":
+            for name in self.cameras:
+                self.cameras[name].model = self.follower_arms["main"].model
+                self.cameras[name].data = self.follower_arms["main"].data
+
         # Connect the cameras
         for name in self.cameras:
             self.cameras[name].connect()

@@ -14,6 +14,7 @@
 
 import abc
 from dataclasses import dataclass
+from typing import List
 
 import draccus
 
@@ -112,3 +113,16 @@ class IntelRealSenseCameraConfig(CameraConfig):
 
         if self.rotation not in [-90, None, 90, 180]:
             raise ValueError(f"`rotation` must be in [-90, None, 90, 180] (got {self.rotation})")
+
+
+@CameraConfig.register_subclass("mujoco")
+@dataclass
+class MujocoCameraConfig(CameraConfig):
+    """Configuration for a camera that renders a MuJoCo simulation."""
+
+    width: int
+    height: int
+    camera_name: str
+    channels: int = 3
+    fps: int = 30
+    mock: bool = False

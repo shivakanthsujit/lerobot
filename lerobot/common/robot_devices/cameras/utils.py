@@ -19,8 +19,10 @@ import numpy as np
 from lerobot.common.robot_devices.cameras.configs import (
     CameraConfig,
     IntelRealSenseCameraConfig,
+    MujocoCameraConfig,
     OpenCVCameraConfig,
 )
+from lerobot.common.robot_devices.cameras.mujoco_camera import MujocoCamera
 
 
 # Defines a camera type
@@ -44,6 +46,11 @@ def make_cameras_from_configs(camera_configs: dict[str, CameraConfig]) -> list[C
             from lerobot.common.robot_devices.cameras.intelrealsense import IntelRealSenseCamera
 
             cameras[key] = IntelRealSenseCamera(cfg)
+
+        elif cfg.type == "mujoco":
+            # The MjModel and MjData are not available at this stage of camera creation.
+            # They will be passed later, for example, by the robot that owns this camera.
+            cameras[key] = MujocoCamera(cfg)
         else:
             raise ValueError(f"The camera type '{cfg.type}' is not valid.")
 
@@ -62,6 +69,12 @@ def make_camera(camera_type, **kwargs) -> Camera:
 
         config = IntelRealSenseCameraConfig(**kwargs)
         return IntelRealSenseCamera(config)
+
+    elif camera_type == "mujoco":
+        from lerobot.common.robot_devices.cameras.mujoco_camera import MujocoCamera
+
+        config = MujocoCameraConfig(**kwargs)
+        return MujocoCamera(config)
 
     else:
         raise ValueError(f"The camera type '{camera_type}' is not valid.")
