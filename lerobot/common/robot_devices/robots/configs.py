@@ -27,6 +27,7 @@ from lerobot.common.robot_devices.motors.configs import (
     DynamixelMotorsBusConfig,
     FeetechMotorsBusConfig,
     MotorsBusConfig,
+    MujocoArmConfig,
 )
 
 
@@ -534,6 +535,67 @@ class So100RobotConfig(ManipulatorRobotConfig):
                     "gripper": [6, "sts3215"],
                 },
             ),
+        }
+    )
+
+    cameras: dict[str, CameraConfig] = field(
+        default_factory=lambda: {
+            "laptop": OpenCVCameraConfig(
+                camera_index=0,
+                fps=30,
+                width=640,
+                height=480,
+            ),
+            "phone": OpenCVCameraConfig(
+                camera_index=1,
+                fps=30,
+                width=640,
+                height=480,
+            ),
+        }
+    )
+
+    mock: bool = False
+
+
+@RobotConfig.register_subclass("so100_sim_follower")
+@dataclass
+class So100SimFollowerConfig(ManipulatorRobotConfig):
+    """Robot config for an So100 setup with a physical Feetech leader arm and a simulated follower arm."""
+    calibration_dir: str = ".cache/calibration/so100_sim_follower" # Or a new one like .cache/calibration/so100_sim
+    max_relative_target: int | None = None # From So100RobotConfig
+
+    leader_arms: dict[str, MotorsBusConfig] = field(
+        default_factory=lambda: {
+            "main": FeetechMotorsBusConfig(
+                port="/dev/tty.usbmodem5A460844861", # Example from So100
+                motors={
+                    "shoulder_pan": [1, "sts3215"],
+                    "shoulder_lift": [2, "sts3215"],
+                    "elbow_flex": [3, "sts3215"],
+                    "wrist_flex": [4, "sts3215"],
+                    "wrist_roll": [5, "sts3215"],
+                    "gripper": [6, "sts3215"],
+                },
+            )
+        }
+    )
+
+    follower_arms: dict[str, MotorsBusConfig] = field(
+        default_factory=lambda: {
+            "main": MujocoArmConfig(
+                xml_file_path="xml/scene.xml", # Updated XML path
+                motor_signs = [-1, -1, 1, 1, -1, 1],
+                actuator_names=[ # Using actuator_names based on the provided XML
+                    "Rotation",
+                    "Pitch",
+                    "Elbow",
+                    "Wrist_Pitch",
+                    "Wrist_Roll",
+                    "Jaw",
+                ],
+                launch_viewer=True,
+            )
         }
     )
 

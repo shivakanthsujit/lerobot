@@ -243,7 +243,7 @@ class ManipulatorRobot:
 
         if self.robot_type in ["koch", "koch_bimanual", "aloha"]:
             from lerobot.common.robot_devices.motors.dynamixel import TorqueMode
-        elif self.robot_type in ["so100", "so101", "moss", "lekiwi"]:
+        elif self.robot_type in ["so100", "so101", "moss", "lekiwi", "so100_sim_follower"]:
             from lerobot.common.robot_devices.motors.feetech import TorqueMode
 
         # We assume that at connection time, arms are in a rest position, and torque can
@@ -313,12 +313,14 @@ class ManipulatorRobot:
 
                     calibration = run_arm_calibration(arm, self.robot_type, name, arm_type)
 
-                elif self.robot_type in ["so100", "so101", "moss", "lekiwi"]:
+                elif self.robot_type in ["so100", "so101", "moss", "lekiwi", "so100_sim_follower"]:
                     from lerobot.common.robot_devices.robots.feetech_calibration import (
                         run_arm_manual_calibration,
                     )
-
-                    calibration = run_arm_manual_calibration(arm, self.robot_type, name, arm_type)
+                    if self.robot_type == "so100_sim_follower" and arm_type == "follower":
+                        calibration = {}
+                    else:
+                        calibration = run_arm_manual_calibration(arm, self.robot_type, name, arm_type)
 
                 print(f"Calibration is done! Saving calibration file '{arm_calib_path}'")
                 arm_calib_path.parent.mkdir(parents=True, exist_ok=True)

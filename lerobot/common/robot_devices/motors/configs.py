@@ -14,6 +14,7 @@
 
 import abc
 from dataclasses import dataclass
+from typing import List
 
 import draccus
 
@@ -39,3 +40,20 @@ class FeetechMotorsBusConfig(MotorsBusConfig):
     port: str
     motors: dict[str, tuple[int, str]]
     mock: bool = False
+
+
+@MotorsBusConfig.register_subclass("mujoco")
+@dataclass
+class MujocoArmConfig(MotorsBusConfig):
+    xml_file_path: str
+    motor_signs: List[float] | None
+    joint_names: List[str] | None = None
+    actuator_names: List[str] | None = None
+    launch_viewer: bool = True
+    mock: bool = False
+
+    def __post_init__(self):
+        if self.joint_names is None and self.actuator_names is None:
+            raise ValueError("Either 'joint_names' or 'actuator_names' must be specified for MujocoArmConfig.")
+        if self.joint_names is not None and self.actuator_names is not None:
+            raise ValueError("Specify either 'joint_names' or 'actuator_names', not both, for MujocoArmConfig.")
