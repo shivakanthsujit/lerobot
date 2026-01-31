@@ -59,6 +59,12 @@ class PI0FastConfig(PreTrainedConfig):
     max_decoding_steps: int = 256
     fast_skip_tokens: int = 128
 
+    # Attention implementation for PaliGemma, options: "eager", "flash_attention_2", "sdpa"
+    attn_implementation: str = "flash_attention_2"
+
+    # Use LIGER kernels for optimized cross-entropy when available
+    use_liger_ce_loss: bool = True
+
     # Whether to validate that decoded action tokens start with "Action: " prefix
     validate_action_token_prefix: bool = True
 
@@ -107,6 +113,11 @@ class PI0FastConfig(PreTrainedConfig):
 
         if self.dtype not in ["bfloat16", "float32"]:
             raise ValueError(f"Invalid dtype: {self.dtype}")
+
+        if self.attn_implementation not in ["eager", "flash_attention_2", "sdpa"]:
+            raise ValueError(
+                "Invalid attn_implementation. Expected one of: eager, flash_attention_2, sdpa."
+            )
 
     def validate_features(self) -> None:
         """Validate and set up input/output features."""

@@ -15,8 +15,10 @@
 # limitations under the License.
 
 import builtins
+import importlib.util
 import logging
 import math
+import os
 from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict
@@ -27,7 +29,7 @@ import torch.nn.functional as F  # noqa: N812
 from torch import Tensor, nn
 from typing_extensions import Unpack
 
-from lerobot.utils.import_utils import _scipy_available, _transformers_available
+from lerobot.utils.import_utils import _liger_kernel_available, _scipy_available, _transformers_available
 
 # Conditional import for type checking and lazy loading
 if TYPE_CHECKING or _scipy_available:
@@ -43,6 +45,14 @@ else:
     CONFIG_MAPPING = None
     PaliGemmaForConditionalGeneration = None
     AutoTokenizer = None
+
+if TYPE_CHECKING or _liger_kernel_available:
+    try:
+        from liger_kernel.transformers import LigerCrossEntropyLoss
+    except Exception:
+        LigerCrossEntropyLoss = None
+else:
+    LigerCrossEntropyLoss = None
 
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.policies.pi0_fast.configuration_pi0_fast import PI0FastConfig
@@ -60,6 +70,35 @@ from lerobot.utils.constants import (
 
 class ActionSelectKwargs(TypedDict, total=False):
     temperature: float | None
+
+
+def _is_flash_attn_2_available() -> bool:
+    if not _transformers_available:
+        return False
+    try:
+        from transformers.utils import is_flash_attn_2_available
+
+        return is_flash_attn_2_available()
+    except Exception:
+        return importlib.util.find_spec("flash_attn") is not None
+
+
+def _set_attn_implementation(config_obj, attn_implementation: str) -> None:
+    if hasattr(config_obj, "_attn_implementation"):
+        setattr(config_obj, "_attn_implementation", attn_implementation)
+    if hasattr(config_obj, "attn_implementation"):
+        setattr(config_obj, "attn_implementation", attn_implementation)
+
+
+def _resolve_attn_implementation(attn_implementation: str | None) -> str | None:
+    if attn_implementation is None:
+        return None
+    if attn_implementation == "flash_attention_2" and not _is_flash_attn_2_available():
+        logging.warning(
+            "flash_attention_2 requested but flash-attn is not available; falling back to sdpa."
+        )
+        return "sdpa"
+    return attn_implementation
 
 
 def pad_vector(vector, new_dim):
@@ -191,6 +230,7 @@ class PI0FastPaliGemma(nn.Module):
         vlm_config,
         use_adarms=None,
         precision: Literal["bfloat16", "float32"] = "bfloat16",
+        attn_implementation: str | None = None,
     ):
         if use_adarms is None:
             use_adarms = [False, False]
@@ -214,6 +254,12 @@ class PI0FastPaliGemma(nn.Module):
         vlm_config_hf.vision_config.projection_dim = 2048
         vlm_config_hf.vision_config.projector_hidden_act = "gelu_fast"
         vlm_config_hf.vision_config.torch_dtype = "float32"
+
+        resolved_attn_impl = _resolve_attn_implementation(attn_implementation)
+        if resolved_attn_impl is not None:
+            _set_attn_implementation(vlm_config_hf, resolved_attn_impl)
+            _set_attn_implementation(vlm_config_hf.text_config, resolved_attn_impl)
+            _set_attn_implementation(vlm_config_hf.vision_config, resolved_attn_impl)
 
         self.paligemma = PaliGemmaForConditionalGeneration(config=vlm_config_hf)
 
@@ -291,14 +337,39 @@ class PI0FastPytorch(nn.Module):  # see openpi `PI0Pytorch`
 
         paligemma_config = get_gemma_config(config.paligemma_variant)
 
+        if config.attn_implementation == "flash_attention_2":
+            os.environ.setdefault("FLASH_ATTENTION_FORCE_BUILD", "0")
+            os.environ.setdefault("FLASH_ATTENTION_SKIP_CUDA_BUILD", "0")
+
+        attn_implementation = _resolve_attn_implementation(config.attn_implementation)
+        if config.attn_implementation == "flash_attention_2" and attn_implementation != "flash_attention_2":
+            logging.warning(
+                "flash_attention_2 requested for PaliGemma but unavailable; using %s instead.",
+                attn_implementation,
+            )
+
         self.paligemma_with_expert = PI0FastPaliGemma(
             paligemma_config,
             use_adarms=[False, True],
             precision=config.dtype,
+            attn_implementation=attn_implementation,
         )
 
         # Initialize gradient checkpointing flag
         self.gradient_checkpointing_enabled = False
+
+        self._torch_ce_loss = torch.nn.CrossEntropyLoss(reduction="none")
+        self._liger_ce_loss = None
+        self._use_liger_ce = False
+        if config.use_liger_ce_loss:
+            if LigerCrossEntropyLoss is None:
+                logging.warning("LIGER CE requested but liger-kernel is not available; using torch CE.")
+            else:
+                try:
+                    self._liger_ce_loss = LigerCrossEntropyLoss(reduction="none")
+                    self._use_liger_ce = True
+                except Exception as exc:
+                    logging.warning("Failed to initialize LIGER CE loss (%s); using torch CE.", exc)
 
         # Compile model if requested
         if config.compile_model:
@@ -564,11 +635,20 @@ class PI0FastPytorch(nn.Module):  # see openpi `PI0Pytorch`
         fast_action_masks = fast_action_masks[:, 1:]  # shift masks to match targets
 
         # compute cross-entropy loss
-        loss_fct = torch.nn.CrossEntropyLoss(reduction="none")
         fast_logits_flat = fast_logits_for_pred.reshape(-1, fast_logits_for_pred.size(-1))
         fast_targets_flat = fast_targets.reshape(-1)
 
+        loss_fct = self._torch_ce_loss
+        if self._use_liger_ce and fast_logits_flat.is_cuda:
+            loss_fct = self._liger_ce_loss
+
         fast_loss_per_token = loss_fct(fast_logits_flat, fast_targets_flat)
+        if fast_loss_per_token.dim() == 0:
+            logging.warning(
+                "LIGER CE did not return per-token loss; falling back to torch CE for masking."
+            )
+            self._use_liger_ce = False
+            fast_loss_per_token = self._torch_ce_loss(fast_logits_flat, fast_targets_flat)
         fast_loss_per_token = fast_loss_per_token.reshape(fast_targets.shape)
 
         # apply mask and compute mean loss
